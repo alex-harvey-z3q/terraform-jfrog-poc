@@ -1,0 +1,40 @@
+name: jfrog-security-poc
+services:
+  postgres:
+    image: postgres:16.8@sha256:301bcb60b8a3ee4ab7e147932723e3abd1cef53516ce5210b39fd9fe5e3602ae
+    environment:
+      POSTGRES_DB: artifactory
+      POSTGRES_USER: artifactory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make setup first}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U artifactory -d artifactory']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  artifactory:
+    image: releases-docker.jfrog.io/jfrog/artifactory-pro:7.161.15@sha256:c18ff9b9e6141f54fdaa91d2485077ae4d7743609703aaae7440c7dcda68e29b
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      JF_SHARED_DATABASE_TYPE: postgresql
+      JF_SHARED_DATABASE_DRIVER: org.postgresql.Driver
+      JF_SHARED_DATABASE_URL: jdbc:postgresql://postgres:5432/artifactory
+      JF_SHARED_DATABASE_USERNAME: artifactory
+      JF_SHARED_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Run make setup first}
+      JF_SHARED_NODE_ID: security-poc
+      EXTRA_JAVA_OPTIONS: '-Xms512m -Xmx2g'
+    ports:
+      - '127.0.0.1:8081:8081'
+      - '127.0.0.1:8082:8082'
+    volumes:
+      - artifactory-data:/var/opt/jfrog/artifactory
+    ulimits:
+      nofile:
+        soft: 32000
+        hard: 40000
+volumes:
+  postgres-data:
+  artifactory-data:

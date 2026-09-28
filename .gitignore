@@ -1,0 +1,11 @@
+.env
+.local/
+**/.terraform/
+**/terraform.tfstate*
+**/*.tfplan
+**/*.tfvars
+!**/example.tfvars
+__pycache__/
+*.pyc
+crash.log
+POC-PLAN.md
