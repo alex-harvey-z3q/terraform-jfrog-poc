@@ -9,18 +9,18 @@ terraform {
 }
 
 variable "login_attempts" {
-  description = "Failed-login lockout threshold."
+  description = "Policy threshold; exact fifth-attempt behaviour requires live acceptance."
   type        = number
   default     = 5
   validation {
-    condition     = var.login_attempts >= 3 && var.login_attempts <= 20 && floor(var.login_attempts) == var.login_attempts
-    error_message = "login_attempts must be an integer from 3 to 20."
+    condition     = var.login_attempts == 5
+    error_message = "The Basic Security Configuration requires login_attempts = 5."
   }
 }
 
 resource "artifactory_general_security" "baseline" {
   enable_anonymous_access = false
-  encryption_policy       = "SUPPORTED"
+  encryption_policy       = "REQUIRED"
   lifecycle {
     prevent_destroy = true
   }
@@ -51,7 +51,7 @@ resource "artifactory_password_expiration_policy" "baseline" {
 output "baseline" {
   value = {
     anonymous_access   = false
-    encryption_policy  = "SUPPORTED"
+    encryption_policy  = "REQUIRED"
     lockout_enabled    = true
     login_attempts     = var.login_attempts
     expiration_enabled = false

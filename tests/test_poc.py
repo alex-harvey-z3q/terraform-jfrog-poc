@@ -77,7 +77,7 @@ class WorkflowTests(unittest.TestCase):
     def test_partial_fixture_failure_cleans_up_only_created_objects(self):
         api = Mock()
         fixture = poc.Fixtures(api)
-        # repo GET/PUT succeed, user GET fails; only repository should be deleted.
+        # repo GET/PUT succeed, artifact PUT fails; only repository should be deleted.
         api.request.side_effect = [(404, b''), (200, b''), poc.Failure('API unavailable'), (200, b'')]
         with self.assertRaises(poc.Failure):
             fixture.__enter__()

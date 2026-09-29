@@ -39,3 +39,17 @@ persistence:
 	$(PYTHON) scripts/poc.py persistence
 reset:
 	$(PYTHON) scripts/poc.py reset --confirm '$(CONFIRM)'
+
+# Deployment-owned settings are separate from the Terraform subset.
+.PHONY: security-apply security-check security-inputs verify-managed
+security-apply:
+	$(PYTHON) scripts/security.py apply
+security-check:
+	$(PYTHON) scripts/security.py check
+security-inputs:
+	$(PYTHON) scripts/security.py inputs
+verify-managed:
+	$(PYTHON) scripts/poc.py verify-managed
+.PHONY: security-audit
+security-audit:
+	$(PYTHON) scripts/security.py audit

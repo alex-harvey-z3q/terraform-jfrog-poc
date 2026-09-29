@@ -32,3 +32,18 @@ No organisation-owned instance has been accessed or changed. No licence or admin
 During implementation, pinning the PostgreSQL digest after the first Compose launch recreated the database container while Artifactory was initialising. The partial database then caused an upgrade/licence error. Only the new, empty POC volumes were reset, and the finished configuration booted cleanly with both image digests already pinned. PostgreSQL is healthy and all router services report healthy. The persistence command now stops Artifactory before restarting PostgreSQL, waits for database health, then starts Artifactory.
 
 The lab is left running at http://localhost:8082/ui/ for the initial setup wizard. Factory administrator credentials have not been changed; replace them during setup. No other containers or data were modified.
+
+## Basic Security Configuration update (2026-09-29)
+
+The original table above records the earlier POC, before the additional specification. Its old authentication/lockout test is no longer the acceptance mechanism. No new live writes were performed during this update.
+
+- Terraform encryption changed to REQUIRED; threshold input constrained to 5.
+- Added deployment automation for Access settings, Platform Auditor, and global resource hiding. Added private input validation and a read-only readers/anonymous dependency audit.
+- Removed the old Basic-success/rapid-lockout assertions. Bearer positive control and anonymous-denial tests remain explicitly partial. Exact lockout and temporary-suspension timing are manual acceptance gates.
+- Read-only inspection of the **installed 7.161.15 vendor template** confirmed `max-login-delay-incorrect-attempts`, `max-login-delay-millis`, `disable-remember-me`, `password-autocomplete-enabled`, both API-key flags, Basic enablement/hiding, and project anonymous access keys. This is schema evidence, not evidence that desired values are active.
+- A read-only probe of the existing general-security endpoint confirmed the `hideUnauthorizedResources` boolean exists and is currently **false**. That control is not already compliant.
+- Terraform formatting/schema validation passed (plugin socket required unsandboxed execution). Python offline tests: **27 passed**; `git diff --check` passed.
+
+Licence activation, replacing factory credentials, admin-token bootstrap, live configuration writes, all runtime behaviour checks and full policy acceptance remain pending. The initial-admin account is not represented as disabled. `make verify` now fails closed on outstanding manual acceptance rather than labelling a three-resource check as full compliance.
+
+Read-only deployment checker trial: the vendor template includes an intentional invalid-YAML import marker, now handled only when reading its defaults. The corrected parser was exercised against the installed template. The running lab has **no `access.config.latest.yml`**, so the checker correctly stops with a missing current-configuration error instead of inferring runtime compliance from defaults. Deployment writes are also gated on that service-generated file. No speculative empty import was created.

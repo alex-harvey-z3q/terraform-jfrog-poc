@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only Artifactory POC orchestration. Standard library; no dependencies."""
+"""Local-only Artifactory POC orchestration; full verification also uses PyYAML."""
 import argparse
 import base64
 import getpass
@@ -52,7 +52,7 @@ class API:
         self.token = token
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
-    def request(self, method, path, body=None, basic=None, anonymous=False, allowed=None):
+    def request(self, method, path, body=None, basic=None, anonymous=False, allowed=None, content_type=None):
         if not path.startswith('/') or path.startswith('//') or '://' in path:
             raise Failure('API paths must be local absolute paths')
         headers = {}
@@ -69,6 +69,8 @@ class API:
             headers['Content-Type'] = 'application/json'
         elif body is not None:
             headers['Content-Type'] = 'application/octet-stream'
+        if content_type:
+            headers['Content-Type'] = content_type
         req = urllib.request.Request(URL + path, data=body, headers=headers, method=method)
         try:
             with self.opener.open(req, timeout=15) as response:
@@ -189,13 +191,24 @@ def differences(api, baseline):
             if type(actual.get(key)) is not type(value) or actual.get(key) != value}
 
 
-def verify():
+def verify_managed():
     diff = differences(API(credentials()), desired())
     if diff:
         print(json.dumps(diff, indent=2))
         raise Failure('Configuration read-back differs from baseline')
     clean_plan()
-    print('PASS: independent read-back and Terraform plan are clean.')
+    print('PASS: Terraform-managed subset only; full security acceptance is separate.')
+
+
+def verify():
+    verify_managed()
+    # No local checklist or desired configuration can certify runtime compliance.
+    from security import check_deployment, audit_assignments, check_inputs
+    check_deployment()
+    audit_assignments()
+    check_inputs()
+    raise Failure('Full acceptance still requires the manual checks in docs/coverage.md; '
+                  'managed settings alone do not establish compliance')
 
 
 def clean_plan():
@@ -230,10 +243,6 @@ class Fixtures:
         self.api = api
         suffix = uuid.uuid4().hex[:12]
         self.repo = 'poc-' + suffix
-        self.reader = 'poc-reader-' + suffix
-        self.locked = 'poc-lock-' + suffix
-        self.permission = 'poc-perm-' + suffix
-        self.password = 'Poc!Aa9' + secrets.token_hex(20)
         self.description = 'Unmanaged sentinel ' + suffix
         self.content = b'Artifactory security POC test artifact\n'
         self.cleanup_paths = []
@@ -247,15 +256,6 @@ class Fixtures:
         try:
             self.create('/artifactory/api/repositories/' + self.repo,
                         {'rclass': 'local', 'packageType': 'generic', 'description': self.description})
-            for user in (self.reader, self.locked):
-                self.create('/artifactory/api/security/users/' + user,
-                            {'name': user, 'email': user + '@example.invalid',
-                             'password': self.password, 'admin': False, 'groups': [],
-                             'profileUpdatable': False, 'internalPasswordDisabled': False})
-            self.create('/artifactory/api/v2/security/permissions/' + self.permission,
-                        {'name': self.permission, 'repo': {'repositories': [self.repo],
-                         'include-patterns': ['**'], 'exclude-patterns': [],
-                         'actions': {'users': {self.reader: ['r'], self.locked: ['r']}}}})
             self.api.request('PUT', self.artifact, self.content)
             return self
         except Exception:
@@ -270,23 +270,14 @@ class Fixtures:
         if self.api.get('/artifactory/api/repositories/' + self.repo).get('description') != self.description:
             raise Failure('Unmanaged repository description changed')
 
-    def behaviour(self, attempts):
+    def behaviour(self):
+        # Positive control uses an existing bearer token. REQUIRED encryption and
+        # disabled Basic mean password denials cannot establish account lockout.
+        _, body = self.api.request('GET', self.artifact)
+        if body != self.content:
+            raise Failure('Bearer-token download did not return the seeded artifact')
         self.api.request('GET', self.artifact, anonymous=True, allowed=DENIED)
-        for user in (self.reader, self.locked):
-            _, body = self.api.request('GET', self.artifact, basic=(user, self.password))
-            if body != self.content:
-                raise Failure('Authenticated download did not return the seeded artifact')
-        # Some versions lock after exceeding, rather than reaching, the threshold.
-        for _ in range(attempts + 1):
-            self.api.request('GET', self.artifact, basic=(self.locked, 'DeliberatelyWrong!9'), allowed={401, 403})
-        self.api.request('GET', self.artifact, basic=(self.locked, self.password), allowed={401, 403})
-        # A denial alone could be temporary login suspension: require explicit locked-user evidence.
-        locked_users = self.api.get('/artifactory/api/security/lockedUsers')
-        names = locked_users if isinstance(locked_users, list) else locked_users.get('users', [])
-        names = [item.get('name', item.get('username')) if isinstance(item, dict) else item for item in names]
-        if self.locked not in names:
-            raise Failure('Authentication was denied but locked-users API did not confirm account lockout')
-        print('PASS: anonymous denied, Basic authentication works, authorised content matches, disposable user locked.')
+        print('PASS: bearer download and anonymous denial only; lockout/Basic checks remain manual.')
 
     def __exit__(self, *_):
         failures = []
@@ -300,16 +291,16 @@ class Fixtures:
 
 
 def integration():
-    verify()
+    verify_managed()
     with Fixtures(API(credentials())) as fixture:
-        fixture.behaviour(desired()['login_attempts'])
+        fixture.behaviour()
         fixture.sentinel()
 
 
 def demo():
-    verify()
+    verify_managed()
     with Fixtures(API(credentials())) as fixture:
-        fixture.behaviour(desired()['login_attempts'])
+        fixture.behaviour()
         try:
             drift()
             plan = LOCAL / 'drift.tfplan'
@@ -329,19 +320,19 @@ def demo():
             # The disposable lab must not be left with injected drift after a failed assertion.
             apply(automatic=True)
             (LOCAL / 'drift.tfplan').unlink(missing_ok=True)
-        verify()
+        verify_managed()
         fixture.sentinel()
     print('PASS: drift detected precisely, remediated, and unrelated configuration preserved.')
 
 
 def persistence():
-    verify()
+    verify_managed()
     run([*COMPOSE, 'stop', 'artifactory'])
     run([*COMPOSE, 'restart', 'postgres'])
     run([*COMPOSE, 'up', '-d', '--wait', '--wait-timeout', '60', 'postgres'])
     run([*COMPOSE, 'start', 'artifactory'])
     wait_ready()
-    verify()
+    verify_managed()
 
 
 def reset(confirmation):
@@ -357,11 +348,11 @@ def reset(confirmation):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['setup', 'wait', 'bootstrap', 'import', 'plan', 'apply', 'verify', 'test', 'drift', 'demo', 'persistence', 'reset'])
+    parser.add_argument('command', choices=['setup', 'wait', 'bootstrap', 'import', 'plan', 'apply', 'verify', 'verify-managed', 'test', 'drift', 'demo', 'persistence', 'reset'])
     parser.add_argument('--confirm', default='')
     args = parser.parse_args()
     commands = {'setup': setup, 'wait': wait_ready, 'bootstrap': bootstrap, 'import': import_settings,
-                'plan': lambda: terraform('plan', '-input=false'), 'apply': apply, 'verify': verify,
+                'plan': lambda: terraform('plan', '-input=false'), 'apply': apply, 'verify': verify, 'verify-managed': verify_managed,
                 'test': integration, 'drift': drift, 'demo': demo, 'persistence': persistence,
                 'reset': lambda: reset(args.confirm)}
     try:
@@ -376,4 +367,6 @@ def main():
 
 
 if __name__ == '__main__':
+    # security imports this module; share the same Failure class in CLI mode.
+    sys.modules['poc'] = sys.modules[__name__]
     sys.exit(main())
