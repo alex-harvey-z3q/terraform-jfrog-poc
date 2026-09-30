@@ -59,3 +59,9 @@ Read-only deployment checker trial: the vendor template includes an intentional 
 - `git diff --check` passed. No Artifactory apply, restart, import or state migration was performed. Live end-to-end acceptance remains pending licence activation, administrator-token bootstrap and the current Access configuration file.
 
 The updated README includes the Terragrunt hook sequence, state/cache behaviour, failure recovery and the revised ASCII ownership diagram. A successful managed-subset apply remains distinct from the full manual security acceptance gate.
+
+## Terraform-first correction (2026-09-30)
+
+- Moved global resource hiding from `security.py` into Terraform. The Artifactory provider does not expose this control, so `terraform_data.resource_hiding` uses a pinned HashiCorp external data source for the plan-time boolean read and a minimal shell local-exec adapter for the narrow PATCH and read-back.
+- The token remains process-environment-only; the adapters emit only a boolean and never write the token or response into state.
+- Removed Python preflight and Terraform verification hooks. Terragrunt now invokes Python only for the Access/system-YAML deployment boundary, where JFrog requires self-hosted filesystem access and an Artifactory restart.

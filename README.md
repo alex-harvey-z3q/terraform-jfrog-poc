@@ -1,6 +1,6 @@
 # Artifactory security configuration POC
 
-A disposable, localhost-only Artifactory lab for proving configuration-as-code and drift correction on **Administration → Security → General**. Terragrunt coordinates Terraform and Python hooks. Terraform owns three baseline policies; Python manages additional deployment settings and verifies effective configuration. The additional Basic Security Configuration is mapped in [coverage](docs/coverage.md).
+A disposable, localhost-only Artifactory lab for proving configuration-as-code and drift correction on **Administration → Security → General**. Terragrunt coordinates Terraform and a narrow self-hosted Python hook. Terraform owns every API-backed control in this POC; Python is reserved for Access and `system.yaml` changes that require filesystem access and an Artifactory restart. The additional Basic Security Configuration is mapped in [coverage](docs/coverage.md).
 
 **Status:** implementation is available; see [actual validation results](docs/results.md). Full integration acceptance requires a valid self-hosted trial licence. Offline tests are not evidence that the server accepts these APIs.
 
@@ -12,11 +12,8 @@ A disposable, localhost-only Artifactory lab for proving configuration-as-code a
               v
   Terragrunt: examples/local/terragrunt.hcl
   |
-  +-- BEFORE plan / apply / import: Python poc.py preflight
-  |     Check credentials, local server version and read APIs
-  |
   +-- BEFORE apply: Python security.py preflight
-  |     Check existing YAML, pending files and API schema (read only)
+  |     Check existing Access/system YAML and pending files (read only)
   |
   +-- TERRAFORM: modules/security-baseline
   |     Provider manages through the Artifactory API:
@@ -24,6 +21,8 @@ A disposable, localhost-only Artifactory lab for proving configuration-as-code a
   |       - password encryption REQUIRED
   |       - permanent lock threshold 5
   |       - password expiry/emails off
+  |       - hide unauthorised resources
+  |         (Terraform state + external-data read + local-exec API adapter)
   |
   +-- AFTER successful apply: Python security.py apply
   |     Access YAML + system.yaml + restart:
@@ -32,14 +31,8 @@ A disposable, localhost-only Artifactory lab for proving configuration-as-code a
   |       - Remember Me/password autocomplete off
   |       - suspension: 2 failures, maximum delay 60 seconds
   |       - Platform Auditor feature on
-  |     Artifactory API patch:
-  |       - hide unauthorised resources
-  |
-  +-- AFTER success: Python poc.py verify-managed
-  |     Terraform policy read-back + clean Terraform plan
-  |
   +-- AFTER success: Python security.py check
-        Deployment configuration/API read-back
+        Deployment configuration read-back
 
   All settings target the local Artifactory + Access services.
   Docker Compose runs Artifactory and PostgreSQL.
@@ -52,8 +45,9 @@ A disposable, localhost-only Artifactory lab for proving configuration-as-code a
 Hooks run in the order shown. A failed preflight stops Terraform; a failed
 Terraform apply skips configuration hooks; a failed after-hook stops the
 remaining checks and makes the command fail. Plan/import have no Python
-configuration writes. Python-managed changes are outside Terraform's plan and
-state; a clean plan covers only Terraform's policies.
+configuration writes. The Access/system-YAML subset is outside Terraform state;
+the API-backed controls, including resource hiding, are visible in Terraform's
+plan and state.
 
 Terraform and Python continue to own different settings. The full coverage
 and manual acceptance gates remain in [coverage](docs/coverage.md).
@@ -93,9 +87,9 @@ Both Terraform and the Python client are fixed to localhost:8082. This lab delib
 ## Apply the baseline
 
 ```sh
-make import         # Initialises Terraform, imports the three existing singleton policies
+make import         # Initialises Terraform, imports the three existing provider singleton policies
 make plan           # Review intended changes
-make apply          # Terragrunt preflights, Terraform apply, Python apply/check hooks
+make apply          # Terraform apply; Python only applies/checks YAML-backed settings
 make verify-managed # Optional standalone Terraform-subset verification
 make security-check # Service-generated Access state and API read-back
 make security-audit # Read-only readers/anonymous dependency inventory
@@ -124,7 +118,7 @@ or `.local/admin-token` into Terraform's process environment. No token is put in
 HCL, command arguments or generated backend files. Use a Python environment
 where `python3` is available on PATH for the engine launcher.
 
-The module disables anonymous access, requires encrypted client passwords (`REQUIRED`), and enables the permanent-lock policy with threshold 5. Other values for `login_attempts` are now rejected by validation. Existing password-expiry settings are preserved. Deployment automation adds Platform Auditor, project-anonymous restrictions, Remember Me/autocomplete disabling, API-key creation/authentication disabling, temporary-suspension configuration and global resource hiding. It owns separate fields from Terraform.
+The module disables anonymous access, requires encrypted client passwords (`REQUIRED`), enables the permanent-lock policy with threshold 5, and enables global resource hiding. Other values for `login_attempts` are rejected by validation. Existing password-expiry settings are preserved. A Terraform external-data/local-exec adapter supplies the provider gap for resource hiding: it reads the boolean during planning, records it as an observed trigger, and remediates drift during apply. Deployment automation is limited to Platform Auditor, project-anonymous restrictions, Remember Me/autocomplete disabling, API-key creation/authentication disabling, and temporary-suspension configuration.
 
 **This is not full compliance.** Basic-auth lockdown and exceptions, initial-admin disabling, SSH, the login dialog, exact suspension/lockout behaviour, 15-minute idle expiry, safe readers deletion and role migration require the documented inputs/manual acceptance. `make verify` deliberately cannot certify those from a local file.
 
@@ -142,8 +136,8 @@ remain unchanged. No state move or re-import is needed for an already imported
 lab. Private `.local`/`.env` files and state are excluded from source copies;
 the committed provider lock file is generated verbatim in the cache and init uses `-lockfile=readonly`. Update provider checksums explicitly in the source lock file when upgrading. Cache files are ignored by Git.
 
-Inside the verification hook, Python calls Terraform directly in the initialized
-cache to avoid recursive hooks. Standalone verification uses Terragrunt.
+Standalone verification uses Terragrunt. `make verify-managed` remains an
+explicit read-only acceptance check; it is not an apply hook.
 Always use this unit's default workspace; alternative workspaces/backends and
 production targets are not supported by this lab.
 

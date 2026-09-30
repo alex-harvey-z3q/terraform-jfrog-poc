@@ -113,26 +113,6 @@ def check_deployment():
     if mismatches(system, FRONTEND):
         raise Failure('Platform Auditor deployment flag missing; verify its UI activation after restart')
     print('CONFIGURED: Platform Auditor flag; verify role availability in the running UI.')
-    api = API(credentials())
-    if api.get('/artifactory/api/securityconfig').get('hideUnauthorizedResources') is not True:
-        raise Failure('Global resource hiding disabled or unavailable')
-    print('PASS: global resource-hiding setting; non-admin behavioural checks still required.')
-
-
-def apply_resource_hiding(api):
-    # A narrow YAML patch uses the same supported configuration mechanism as
-    # the pinned provider, but owns a different global security property.
-    current = api.get('/artifactory/api/securityconfig')
-    if type(current.get('hideUnauthorizedResources')) is not bool:
-        raise Failure('Global resource-hiding read-back field unavailable; refusing write')
-    if current['hideUnauthorizedResources']:
-        return
-    api.request('PATCH', '/artifactory/api/system/configuration',
-                b'security:\n  hideUnauthorizedResources: true\n', content_type='application/yaml')
-    if api.get('/artifactory/api/securityconfig').get('hideUnauthorizedResources') is not True:
-        raise Failure('Resource-hiding patch did not persist')
-
-
 def deployment_preflight():
     """Read-only prerequisites, run before Terraform can modify anything."""
     # Parse both documents and verify merge compatibility before the apply.
@@ -141,10 +121,7 @@ def deployment_preflight():
     run([*COMPOSE, 'exec', '-T', 'artifactory', 'test', '!', '-e', IMPORT], capture=True)
     for path in (SYSTEM, IMPORT):
         run([*COMPOSE, 'exec', '-T', 'artifactory', 'test', '!', '-e', path + '.poc-tmp'], capture=True)
-    current = API(credentials()).get('/artifactory/api/securityconfig')
-    if type(current.get('hideUnauthorizedResources')) is not bool:
-        raise Failure('Global resource-hiding read-back field unavailable')
-    print('PASS: deployment source files, pending-file checks and hiding API schema.')
+    print('PASS: deployment source files and pending-file checks.')
 
 
 def apply_deployment():
@@ -159,7 +136,6 @@ def apply_deployment():
     updated_access, updated_system = merge(access, ACCESS), merge(system, FRONTEND)
     # Refuse a pending import before any mutation, including the API patch.
     run([*COMPOSE, 'exec', '-T', 'artifactory', 'test', '!', '-e', IMPORT], capture=True)
-    apply_resource_hiding(api)
     if updated_access == access and updated_system == system:
         print('No deployment changes required; verify runtime UI and behaviour separately.')
         return

@@ -41,11 +41,6 @@ terraform {
     arguments = ["-lockfile=readonly"]
   }
 
-  before_hook "credentials_and_api" {
-    commands = ["plan", "apply", "import"]
-    execute  = [local.python, "${local.scripts}/poc.py", "preflight"]
-  }
-
   before_hook "deployment_prerequisites" {
     commands = ["apply"]
     execute  = [local.python, "${local.scripts}/security.py", "preflight"]
@@ -55,12 +50,6 @@ terraform {
   after_hook "apply_additional_security" {
     commands     = ["apply"]
     execute      = [local.python, "${local.scripts}/security.py", "apply"]
-    run_on_error = false
-  }
-
-  after_hook "verify_terraform" {
-    commands     = ["apply"]
-    execute      = [local.python, "${local.scripts}/poc.py", "verify-managed"]
     run_on_error = false
   }
 

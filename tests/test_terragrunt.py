@@ -39,11 +39,10 @@ class HookLogicTests(unittest.TestCase):
 
     def test_preflight_missing_configuration_never_writes(self):
         with patch.object(security, 'read_server', side_effect=poc.Failure('missing config')), \
-             patch.object(security, 'stage') as stage, patch.object(security, 'apply_resource_hiding') as hiding:
+             patch.object(security, 'stage') as stage:
             with self.assertRaises(poc.Failure):
                 security.deployment_preflight()
         stage.assert_not_called()
-        hiding.assert_not_called()
 
     def test_engine_supplies_token_only_in_environment(self):
         engine = runpy.run_path(str(ROOT / 'scripts/terraform-engine'))
@@ -126,8 +125,8 @@ sys.exit(1 if name == os.environ.get('FAIL_HOOK') else 0)
     def test_successful_apply_orders_hooks_and_preserves_state_location(self):
         result, events = self.invoke('apply')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(events, ['hook:poc.py:preflight', 'hook:security.py:preflight', 'terraform:apply',
-                                  'hook:security.py:apply', 'hook:poc.py:verify-managed', 'hook:security.py:check'])
+        self.assertEqual(events, ['hook:security.py:preflight', 'terraform:apply',
+                                  'hook:security.py:apply', 'hook:security.py:check'])
         backends = list((self.unit / '.terragrunt-cache').rglob('backend.tf'))
         self.assertEqual(len(backends), 1)
         self.assertIn(str(self.unit / 'terraform.tfstate'), backends[0].read_text())
@@ -140,22 +139,22 @@ sys.exit(1 if name == os.environ.get('FAIL_HOOK') else 0)
     def test_plan_only_runs_read_only_preflight_and_preserves_detailed_exit_code(self):
         result, events = self.invoke('plan', ENGINE_EXIT='2')
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertEqual(events, ['hook:poc.py:preflight', 'terraform:plan'])
+        self.assertEqual(events, ['terraform:plan'])
 
     def test_failed_terraform_apply_never_runs_mutating_hook(self):
         result, events = self.invoke('apply', ENGINE_EXIT='1')
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(events, ['hook:poc.py:preflight', 'hook:security.py:preflight', 'terraform:apply'])
+        self.assertEqual(events, ['hook:security.py:preflight', 'terraform:apply'])
 
     def test_failed_preflight_prevents_terraform_and_after_hooks(self):
         result, events = self.invoke('apply', FAIL_HOOK='hook:security.py:preflight')
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(events, ['hook:poc.py:preflight', 'hook:security.py:preflight'])
+        self.assertEqual(events, ['hook:security.py:preflight'])
 
     def test_failed_configuration_hook_stops_success_checks(self):
         result, events = self.invoke('apply', FAIL_HOOK='hook:security.py:apply')
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(events, ['hook:poc.py:preflight', 'hook:security.py:preflight', 'terraform:apply',
+        self.assertEqual(events, ['hook:security.py:preflight', 'terraform:apply',
                                   'hook:security.py:apply'])
 
     def test_validate_does_not_call_any_security_hook(self):

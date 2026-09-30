@@ -3,7 +3,9 @@ import copy
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,20 +90,44 @@ class SecurityTests(unittest.TestCase):
                 security.apply_deployment()
             stage.assert_not_called()
 
-    def test_resource_hiding_requires_effective_readback(self):
-        api = Mock()
-        api.get.side_effect = [{'hideUnauthorizedResources': False}, {'hideUnauthorizedResources': False}]
-        with self.assertRaises(Failure):
-            security.apply_resource_hiding(api)
-        self.assertEqual(api.request.call_count, 1)
-        self.assertEqual(api.request.call_args.kwargs['content_type'], 'application/yaml')
+    def test_terraform_resource_hiding_adapter_reads_and_remediates(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            state, curl = directory / 'state', directory / 'curl'
+            state.write_text('false')
+            curl.write_text('#!/bin/sh\n'
+                            'if [ "$1" = "--fail" ] && [ "$4" = "--request" ]; then\n'
+                            '  printf true > "$TEST_STATE"\n'
+                            '  exit 0\n'
+                            'fi\n'
+                            'printf "{\\\"hideUnauthorizedResources\\\": %s}" "$(cat \"$TEST_STATE\")"\n')
+            curl.chmod(0o755)
+            env = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'],
+                   'TEST_STATE': str(state), 'JFROG_URL': 'http://localhost:8082',
+                   'JFROG_ACCESS_TOKEN': 'private-token'}
+            read = subprocess.run([str(root / 'scripts/read-resource-hiding.sh')], input='{}', text=True,
+                                  capture_output=True, env=env, check=True)
+            self.assertEqual(read.stdout, '{"value":"false"}\n')
+            applied = subprocess.run([str(root / 'scripts/set-resource-hiding.sh')], text=True,
+                                     capture_output=True, env=env)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertEqual(state.read_text(), 'true')
+            self.assertNotIn('private-token', read.stdout + read.stderr + applied.stdout + applied.stderr)
 
-    def test_resource_hiding_unknown_field_prevents_write(self):
-        api = Mock()
-        api.get.return_value = {}
-        with self.assertRaises(Failure):
-            security.apply_resource_hiding(api)
-        api.request.assert_not_called()
+    def test_terraform_resource_hiding_adapter_rejects_unknown_schema(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            curl = directory / 'curl'
+            curl.write_text('#!/bin/sh\nprintf "{}"\n')
+            curl.chmod(0o755)
+            env = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'],
+                   'JFROG_URL': 'http://localhost:8082', 'JFROG_ACCESS_TOKEN': 'private-token'}
+            result = subprocess.run([str(root / 'scripts/read-resource-hiding.sh')], input='{}', text=True,
+                                    capture_output=True, env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('private-token', result.stdout + result.stderr)
 
     def test_staging_uses_stdin_and_preserves_service_file_ownership(self):
         with patch.object(security.subprocess, 'run', return_value=Mock(returncode=0)) as run:
