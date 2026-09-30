@@ -6,7 +6,7 @@ prevent_destroy               = true
 
 locals {
   scripts = "${get_terragrunt_dir()}/../../scripts"
-  python  = get_env("POC_PYTHON", "python3")
+  pwsh    = get_env("POC_PWSH", "pwsh")
 }
 
 generate "local_backend" {
@@ -43,19 +43,19 @@ terraform {
 
   before_hook "deployment_prerequisites" {
     commands = ["apply"]
-    execute  = [local.python, "${local.scripts}/security.py", "preflight"]
+    execute  = [local.pwsh, "-NoProfile", "-File", "${local.scripts}/Security.ps1", "preflight"]
   }
 
   # Ordered, success-only hooks. No configuration writes on plan or import.
   after_hook "apply_additional_security" {
     commands     = ["apply"]
-    execute      = [local.python, "${local.scripts}/security.py", "apply"]
+    execute      = [local.pwsh, "-NoProfile", "-File", "${local.scripts}/Security.ps1", "apply"]
     run_on_error = false
   }
 
   after_hook "verify_deployment" {
     commands     = ["apply"]
-    execute      = [local.python, "${local.scripts}/security.py", "check"]
+    execute      = [local.pwsh, "-NoProfile", "-File", "${local.scripts}/Security.ps1", "check"]
     run_on_error = false
   }
 }

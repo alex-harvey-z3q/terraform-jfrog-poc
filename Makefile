@@ -1,4 +1,4 @@
-PYTHON ?= python3
+PWSH ?= pwsh
 TERRAGRUNT ?= $(if $(wildcard .local/bin/terragrunt),$(CURDIR)/.local/bin/terragrunt,terragrunt)
 COMPOSE = docker compose -f compose.yaml -p jfrog-security-poc
 .DEFAULT_GOAL := help
@@ -6,53 +6,53 @@ COMPOSE = docker compose -f compose.yaml -p jfrog-security-poc
 help:
 	@echo 'setup lab-up bootstrap init import plan apply verify test drift demo persistence lab-down reset'
 setup:
-	$(PYTHON) scripts/poc.py setup
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 setup
 lab-up: setup
 	$(COMPOSE) up -d --quiet-pull
-	$(PYTHON) scripts/poc.py wait
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 wait
 lab-down:
 	$(COMPOSE) down
 bootstrap:
-	$(PYTHON) scripts/poc.py bootstrap
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 bootstrap
 init:
-	$(PYTHON) scripts/poc.py init
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 init
 import:
-	$(PYTHON) scripts/poc.py import
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 import
 plan:
-	$(PYTHON) scripts/poc.py plan
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 plan
 apply:
-	$(PYTHON) scripts/poc.py apply
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 apply
 verify:
-	$(PYTHON) scripts/poc.py verify
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 verify
 test:
-	$(PYTHON) scripts/poc.py test
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 test
 test-unit:
-	$(PYTHON) -m unittest discover -s tests -v
+	$(PWSH) -NoProfile -Command 'Invoke-Pester -Path tests -Output Detailed'
 validate:
 	$(TERRAGRUNT) hcl fmt --check
 	$(TERRAGRUNT) hcl validate
 	terraform fmt -check -recursive
-	$(PYTHON) scripts/poc.py validate
-	$(PYTHON) -m unittest discover -s tests -v
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 validate
+	$(PWSH) -NoProfile -Command 'Invoke-Pester -Path tests -Output Detailed'
 drift:
-	$(PYTHON) scripts/poc.py drift
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 drift
 demo:
-	$(PYTHON) scripts/poc.py demo
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 demo
 persistence:
-	$(PYTHON) scripts/poc.py persistence
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 persistence
 reset:
-	$(PYTHON) scripts/poc.py reset --confirm '$(CONFIRM)'
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 reset -Confirm '$(CONFIRM)'
 
 # Deployment-owned settings are separate from the Terraform subset.
 .PHONY: security-apply security-check security-inputs verify-managed
 # Compatibility alias: configuration writes now run through Terragrunt hooks.
 security-apply: apply
 security-check:
-	$(PYTHON) scripts/security.py check
+	$(PWSH) -NoProfile -File scripts/Security.ps1 check
 security-inputs:
-	$(PYTHON) scripts/security.py inputs
+	$(PWSH) -NoProfile -File scripts/Security.ps1 inputs
 verify-managed:
-	$(PYTHON) scripts/poc.py verify-managed
+	$(PWSH) -NoProfile -File scripts/Poc.ps1 verify-managed
 .PHONY: security-audit
 security-audit:
-	$(PYTHON) scripts/security.py audit
+	$(PWSH) -NoProfile -File scripts/Security.ps1 audit

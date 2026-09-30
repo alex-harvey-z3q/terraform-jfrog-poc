@@ -2,6 +2,10 @@
 
 Run date: 2026-09-29. Environment: macOS ARM64, Docker Engine 29.4.3, Compose 5.1.3, Terraform 1.15.6, Python 3.12.12. Docker reports 10 CPUs and approximately 8 GB RAM allocated.
 
+## PowerShell migration (2026-09-30)
+
+The current implementation replaces the historical Python operational scripts with PowerShell 7 scripts: `scripts/Poc.ps1`, `scripts/Security.ps1`, and `scripts/terraform-engine.ps1`. Terragrunt hooks invoke `Security.ps1` through `pwsh`; the extensionless `terraform-engine` is only a POSIX launcher so Terraform can invoke the PowerShell engine consistently on macOS and Linux. `powershell-yaml` 0.4.12 replaces PyYAML, and Pester replaces the former offline Python suite. The historical Python test counts below document the preceding implementation; they are not results for the current code.
+
 | Check | Result |
 | --- | --- |
 | Artifactory 7.161.15 manifest | Verified ARM64 and AMD64 images; multi-platform digest pinned |
