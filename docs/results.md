@@ -47,3 +47,15 @@ The original table above records the earlier POC, before the additional specific
 Licence activation, replacing factory credentials, admin-token bootstrap, live configuration writes, all runtime behaviour checks and full policy acceptance remain pending. The initial-admin account is not represented as disabled. `make verify` now fails closed on outstanding manual acceptance rather than labelling a three-resource check as full compliance.
 
 Read-only deployment checker trial: the vendor template includes an intentional invalid-YAML import marker, now handled only when reading its defaults. The corrected parser was exercised against the installed template. The running lab has **no `access.config.latest.yml`**, so the checker correctly stops with a missing current-configuration error instead of inferring runtime compliance from defaults. Deployment writes are also gated on that service-generated file. No speculative empty import was created.
+
+## Terragrunt migration (2026-09-29)
+
+- Installed the official Terragrunt **1.1.6** Darwin ARM64 binary in ignored `.local/bin`, checked against the release SHA256SUMS (`fd590f6eebf85ae56293c9b5de8e12505f51d13e6c44cdf6aecef56e094472a0`). HCL pins this version.
+- Terragrunt HCL formatting/validation and real Terraform schema validation through the engine launcher passed. No credentials are needed for these offline checks.
+- **39 Python tests passed**, including six tests running the actual Terragrunt binary with inert Terraform/Python executables. They cover successful hook order, detailed plan exit status, no after-hooks after failed Terraform, preflight and after-hook failure propagation, and validation without security hooks. Additional tests cover token delivery, destruction guards and avoiding recursive hooks.
+- Terragrunt 1.1 always uses a source cache. Tests confirm the generated backend retains the original absolute state path, existing state remains untouched, and private files/state are excluded from source copies.
+- Initial cache initialization omitted the extra platform-specific provider hashes. The final configuration generates the committed lock file verbatim, disables copying a replacement back, and uses readonly lock-file initialization. Real validation confirmed **no changes** to the existing multi-platform lock file.
+- Executed the real `credentials_and_api` before-hook using `terragrunt run --no-auto-init -- plan -input=false`: it failed clearly on the missing admin token, and Terragrunt explicitly did not run Terraform.
+- `git diff --check` passed. No Artifactory apply, restart, import or state migration was performed. Live end-to-end acceptance remains pending licence activation, administrator-token bootstrap and the current Access configuration file.
+
+The updated README includes the Terragrunt hook sequence, state/cache behaviour, failure recovery and the revised ASCII ownership diagram. A successful managed-subset apply remains distinct from the full manual security acceptance gate.

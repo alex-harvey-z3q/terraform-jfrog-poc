@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -111,16 +112,52 @@ def run(args, capture=False, allowed=(0,), env=None):
     return result
 
 
-def terraform(*args, capture=False, allowed=(0,)):
+def terraform_environment(require_credentials=True):
     env = os.environ.copy()
-    env['JFROG_ACCESS_TOKEN'] = credentials()
+    if require_credentials:
+        env['JFROG_ACCESS_TOKEN'] = credentials()
     env['JFROG_URL'] = URL
     env['TF_IN_AUTOMATION'] = '1'
     # Do not let ambient TF_VAR/CLI flags redirect or auto-approve this lab workflow.
     for name in list(env):
         if name.startswith(('TF_CLI_ARGS', 'TF_VAR_')) or name in ('TF_DATA_DIR', 'TF_WORKSPACE'):
             env.pop(name)
-    return run(['terraform', f'-chdir={TF}', *args], capture, allowed, env)
+    return env
+
+
+def terraform(*args, capture=False, allowed=(0,)):
+    """Reuse the initialized hook directory; standalone reads go through Terragrunt."""
+    if os.environ.get('TG_CTX_COMMAND') == 'apply':
+        # The after-apply hook is already in Terragrunt's initialized cache.
+        # Read/plan directly here so verification cannot recursively run hooks.
+        if not args or args[0] not in ('output', 'plan', 'show', 'state'):
+            raise Failure('Only verification commands may call Terraform inside an apply hook')
+        return run(['terraform', f'-chdir={Path.cwd()}', *args], capture, allowed, terraform_environment())
+    return terragrunt(*args, capture=capture, allowed=allowed)
+
+
+def terragrunt(*args, capture=False, allowed=(0,)):
+    binary = shutil.which('terragrunt')
+    if not binary and (LOCAL / 'bin/terragrunt').is_file():
+        binary = str(LOCAL / 'bin/terragrunt')
+    if not binary:
+        raise Failure('Install Terragrunt 1.1.6 or put it in .local/bin/terragrunt')
+    env = terraform_environment(require_credentials=bool(args) and args[0] in ('plan', 'apply', 'import', 'refresh'))
+    # Keep this wrapper fixed to the lab, regardless of ambient TG overrides.
+    for name in list(env):
+        if name.startswith(('TG_', 'TERRAGRUNT_')):
+            env.pop(name)
+    env['POC_PYTHON'] = sys.executable
+    return run([binary, '--working-dir', str(TF), 'run', '--', *args], capture, allowed, env)
+
+
+def preflight():
+    api = API(credentials())
+    if api.get('/artifactory/api/system/version').get('version') != '7.161.15':
+        raise Failure('This Terragrunt unit targets only the pinned 7.161.15 local lab')
+    for path in (GENERAL, LOCK, EXPIRY):
+        api.get(path)
+    print('PASS: local version, credentials and configuration read APIs.')
 
 
 def setup():
@@ -162,13 +199,13 @@ def bootstrap():
 
 
 def import_settings():
-    terraform('init', '-input=false')
+    terragrunt('init', '-input=false')
     # No state yet is normal; do not suppress other state-list errors.
     state = TF / 'terraform.tfstate'
     existing = set(terraform('state', 'list', capture=True).stdout.splitlines()) if state.exists() else set()
     for address, identifier in IMPORTS.items():
         if address not in existing:
-            terraform('import', '-input=false', address, identifier)
+            terragrunt('import', '-input=false', address, identifier)
     print('All global settings are imported.')
 
 
@@ -235,7 +272,7 @@ def apply(automatic=False):
     else:
         # Interactive confirmation is Terraform's normal reviewed-plan workflow.
         args = ['apply']
-    terraform(*args)
+    terragrunt(*args)
 
 
 class Fixtures:
@@ -304,7 +341,7 @@ def demo():
         try:
             drift()
             plan = LOCAL / 'drift.tfplan'
-            result = terraform('plan', '-input=false', '-detailed-exitcode', '-out=' + str(plan), allowed=(0, 2))
+            result = terragrunt('plan', '-input=false', '-detailed-exitcode', '-out=' + str(plan), allowed=(0, 2))
             if result.returncode != 2:
                 raise Failure('Terraform failed to detect injected drift')
             document = json.loads(terraform('show', '-json', str(plan), capture=True).stdout)
@@ -315,7 +352,7 @@ def demo():
             delta = {k for k in change['before'] if change['before'][k] != change['after'].get(k)}
             if change['actions'] != ['update'] or delta != {'login_attempts'}:
                 raise Failure('Drift plan did not contain exactly the lockout threshold update')
-            terraform('apply', '-input=false', str(plan))
+            terragrunt('apply', '-input=false', str(plan))
         finally:
             # The disposable lab must not be left with injected drift after a failed assertion.
             apply(automatic=True)
@@ -348,11 +385,13 @@ def reset(confirmation):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['setup', 'wait', 'bootstrap', 'import', 'plan', 'apply', 'verify', 'verify-managed', 'test', 'drift', 'demo', 'persistence', 'reset'])
+    parser.add_argument('command', choices=['setup', 'wait', 'bootstrap', 'init', 'validate', 'preflight', 'import', 'plan', 'apply', 'verify', 'verify-managed', 'test', 'drift', 'demo', 'persistence', 'reset'])
     parser.add_argument('--confirm', default='')
     args = parser.parse_args()
     commands = {'setup': setup, 'wait': wait_ready, 'bootstrap': bootstrap, 'import': import_settings,
-                'plan': lambda: terraform('plan', '-input=false'), 'apply': apply, 'verify': verify, 'verify-managed': verify_managed,
+                'init': lambda: terragrunt('init', '-input=false'),
+                'validate': lambda: terragrunt('validate'), 'preflight': preflight,
+                'plan': lambda: terragrunt('plan', '-input=false'), 'apply': apply, 'verify': verify, 'verify-managed': verify_managed,
                 'test': integration, 'drift': drift, 'demo': demo, 'persistence': persistence,
                 'reset': lambda: reset(args.confirm)}
     try:

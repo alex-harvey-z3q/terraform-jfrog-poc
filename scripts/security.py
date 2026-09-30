@@ -133,6 +133,20 @@ def apply_resource_hiding(api):
         raise Failure('Resource-hiding patch did not persist')
 
 
+def deployment_preflight():
+    """Read-only prerequisites, run before Terraform can modify anything."""
+    # Parse both documents and verify merge compatibility before the apply.
+    merge(parse_yaml(read_server(LATEST)), ACCESS)
+    merge(parse_yaml(read_server(SYSTEM)), FRONTEND)
+    run([*COMPOSE, 'exec', '-T', 'artifactory', 'test', '!', '-e', IMPORT], capture=True)
+    for path in (SYSTEM, IMPORT):
+        run([*COMPOSE, 'exec', '-T', 'artifactory', 'test', '!', '-e', path + '.poc-tmp'], capture=True)
+    current = API(credentials()).get('/artifactory/api/securityconfig')
+    if type(current.get('hideUnauthorizedResources')) is not bool:
+        raise Failure('Global resource-hiding read-back field unavailable')
+    print('PASS: deployment source files, pending-file checks and hiding API schema.')
+
+
 def apply_deployment():
     setup()
     api = API(credentials())
@@ -239,10 +253,10 @@ def audit_assignments(api=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['apply', 'check', 'inputs', 'audit'])
+    parser.add_argument('command', choices=['apply', 'check', 'inputs', 'audit', 'preflight'])
     args = parser.parse_args()
     try:
-        {'apply': apply_deployment, 'check': check_deployment, 'inputs': check_inputs, 'audit': audit_assignments}[args.command]()
+        {'apply': apply_deployment, 'check': check_deployment, 'inputs': check_inputs, 'audit': audit_assignments, 'preflight': deployment_preflight}[args.command]()
     except (Failure, OSError) as error:
         print('ERROR: ' + str(error), file=sys.stderr)
         return 1

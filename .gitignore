@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 crash.log
 POC-PLAN.md
+
+**/.terragrunt-cache/
+**/.terragrunt-stack/

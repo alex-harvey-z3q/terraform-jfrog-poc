@@ -1,4 +1,5 @@
 PYTHON ?= python3
+TERRAGRUNT ?= $(if $(wildcard .local/bin/terragrunt),$(CURDIR)/.local/bin/terragrunt,terragrunt)
 COMPOSE = docker compose -f compose.yaml -p jfrog-security-poc
 .DEFAULT_GOAL := help
 .PHONY: help setup lab-up lab-down bootstrap init import plan apply verify test test-unit validate drift demo persistence reset
@@ -14,7 +15,7 @@ lab-down:
 bootstrap:
 	$(PYTHON) scripts/poc.py bootstrap
 init:
-	terraform -chdir=examples/local init
+	$(PYTHON) scripts/poc.py init
 import:
 	$(PYTHON) scripts/poc.py import
 plan:
@@ -28,8 +29,10 @@ test:
 test-unit:
 	$(PYTHON) -m unittest discover -s tests -v
 validate:
+	$(TERRAGRUNT) hcl fmt --check
+	$(TERRAGRUNT) hcl validate
 	terraform fmt -check -recursive
-	terraform -chdir=examples/local validate
+	$(PYTHON) scripts/poc.py validate
 	$(PYTHON) -m unittest discover -s tests -v
 drift:
 	$(PYTHON) scripts/poc.py drift
@@ -42,8 +45,8 @@ reset:
 
 # Deployment-owned settings are separate from the Terraform subset.
 .PHONY: security-apply security-check security-inputs verify-managed
-security-apply:
-	$(PYTHON) scripts/security.py apply
+# Compatibility alias: configuration writes now run through Terragrunt hooks.
+security-apply: apply
 security-check:
 	$(PYTHON) scripts/security.py check
 security-inputs:

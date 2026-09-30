@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Terragrunt's Terraform process: inject credentials without putting them in HCL."""
+import os
+import sys
+from poc import Failure, terraform_environment
+
+
+def main():
+    args = sys.argv[1:]
+    # Global policies are removed only by resetting this disposable lab.
+    if 'destroy' in args or any(arg.split('=', 1)[0] == '-destroy' for arg in args):
+        raise Failure('Global-policy destruction is disabled; use the guarded lab reset')
+    offline = {'init', 'validate', 'fmt', 'version', '-version', '--version', '-help', '--help',
+               'output', 'show', 'state', 'providers', 'get'}
+    needs_token = bool(args) and args[0] not in offline
+    env = terraform_environment(require_credentials=needs_token)
+    os.execvpe('terraform', ['terraform', *args], env)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (Failure, OSError) as error:
+        print('ERROR: ' + str(error), file=sys.stderr)
+        sys.exit(1)
